@@ -2,6 +2,7 @@ var bitcore = require('bitcore');
 var networks = bitcore.networks;
 var Script = bitcore.Script;
 var Address = bitcore.Address;
+var base58 = bitcore.base58
 var COIN = bitcore.util.COIN;
 var TransactionBuilder = bitcore.TransactionBuilder;
 var TransactionOut = bitcore.Transaction.Out;
@@ -16,9 +17,9 @@ var MIN_TX_OUT = 0.0001;
 var c = require('./rpc.js');
 var conn = c.getRPCConnection();
 
+/*
 // chunk is a utf string
 function createSmallData(chunk){
-
     // as defined by our friends at https://github.com/bitcoin/bitcoin/blob/ae7e5d7cebd9466d0c095233c9273e72e88fede1/src/script.h#L212
     var OP_SMALLDATA = 249; 
     var script = new Script();
@@ -30,9 +31,10 @@ function createSmallData(chunk){
         throw "Script too large, len: " + script.length;
     }
     return script;
-}
+}*/
 
 
+/*
 // pass in a msg to send and get the output needed to form a valid txn
 function createCheapOuts(msg){
     // deal with script generation
@@ -66,14 +68,15 @@ function createCheapOuts(msg){
     console.log(outs)
     return outs
 }
+*/
 
 
-function findAddr(input_bin){
+function encodeAddr(input_bin){
     if (input_bin.length > 20) {
         throw("input must be less than 20 bytes long");
     } 
 
-    empt = String.fromCharCode(66)
+    empt = String.fromCharCode(95)
     pad = Array(20 - input_bin.length + 1).join(empt)
     bin = new Buffer(input_bin + new Buffer(pad));
 
@@ -81,6 +84,27 @@ function findAddr(input_bin){
     var ver = networks.testnet.addressVersion
     var addr = new Address(ver, bin);
     return addr.toString()
+}
+
+function decodeAddr(address){
+    var raw = base58.decode(address); 
+    data = raw.slice(1, 21);
+    
+    str = data.toString('utf-8');
+
+    return str
+}
+
+function decodeAddressOuts(outs){
+    // takes a list of txouts from a transaction returned by insight
+    var msg = "";
+
+    outs.forEach(function (out) {
+        var addr = out.scriptPubKey.addresses[0]
+        var chunk = decodeAddr(addr)
+        msg += chunk;
+    });
+    return msg
 }
  
 function createAddressOuts(msg) {
@@ -96,7 +120,7 @@ function createAddressOuts(msg) {
         var slice = buf.slice(0, 20);
         buf = buf.slice(20);
         
-        var addr = findAddr(slice)
+        var addr = encodeAddr(slice)
         txout = {
             address: addr,
             amount: MIN_TX_OUT
@@ -106,17 +130,39 @@ function createAddressOuts(msg) {
     return outs
 }
 
+function hashtagStr(str) {
+// centers and pads a hashtag
+    if (str.length > 20) {
+       throw("provided address must be maximum 20 bytes")
+    }
+    var lenPad = (20 - str.length)/2 + 1,
+        leftPad = Array(Math.ceil(lenPad)).join('u'),
+        rightPad = Array(Math.floor(lenPad)).join('u'),
+        padded = leftPad + str + rightPad,
+        buf = new Buffer(padded),
+        addr = new Address(111, buf);
+    return addr.toString()
+}
 
 function createHashTagOuts(hashtags) {
 // returns regular pay to pubkey of addresses that function as hashtags
 // these addresses look like uuuuuuuuuEuroMaidenuuuuuuuuu
 
-    return []
+    outs = [];
+    hashtags.forEach(function (tag){
+        txout = {
+          address: hashtagStr(tag),
+          amount: MIN_TX_OUT
+        }
+        outs.push(txout)
+    });
+    return outs
 }
 
 // Generates a single transaction that contains a msg
-// cheap is a flag to either use standard txs or op push ones
-function singleTx(msg, hashtags, cheap) {
+// callback is the function that gets called with the 
+// signed transaction when this function returns
+function singleTx(msg, hashtags, callback) {
     // provides funding utxos and keys to spend from
     conn.listunspent(function (err, ret){
         if (err) {
@@ -138,62 +184,15 @@ function singleTx(msg, hashtags, cheap) {
             inputBTC += utxo.amount;
             inputTxs.push(utxo); 
         }   
-        console.log(inputTxs);
 
+       var outs = createHashTagOuts(hashtags);
+       outs = createAddressOuts(msg);
 
-        var tx = null;
-
-        var outs = createHashTagOuts(hashtags);
-
-        // NOTE that the create Outs functions return different types
-        if (cheap) {
-          /* cheap transactions are hard to make in JS
-           outs = createCheapOuts(msg);
-
-           var txobj = {
-              version: 1,
-              lock_time: 0,
-              ins: [],
-              outs: []
-           };
-
-           txobj.ins = inputTXs.map(function (utxo) { 
-                            var txin = new Transaction.In(data);
-                            return { 
-                               s: coinUtil.EMPTY_BUFFER,
-                               q: 0xffffffff, 
-                               o: txin.o
-                               
-                            }
-                        });
-
-           // TODO real change addr
-           var addr = "3800ba32c194cc08d3c0324b68df7a21c64996ec"
-           var eng = "DUP HASH160 0x14 " + addr + " EQUALVERIFY CHECKSIG"; 
-           var script = Script.fromHumanReadable(eng);
-           // set remainder
-           var rem = new TransactionOut({script: script,
-                                         value: (MAX_TX_SPEND - .0004) * COIN
-                                        })
-           // we are just adding these outputs into the raw tx
-           tx.outs = [rem] + outs
-
-
-           tx = new Transaction(txobj);
-        */
-
-        } else {
-
-           outs = createAddressOuts(msg);
-           // TODO does nothing
-           // a tx builder obj 
-           // we can set remainderOut
-           console.log(outs)
-           tx = (new TransactionBuilder())
-                .setUnspent(inputTxs)
-                .setOutputs(outs)
-                .build();
-        }
+       // a tx builder obj 
+       var tx = (new TransactionBuilder())
+            .setUnspent(inputTxs)
+            .setOutputs(outs)
+            .build();
 
         
         var unsigned = tx.serialize().toString('hex')
@@ -202,8 +201,7 @@ function singleTx(msg, hashtags, cheap) {
             if (err) {
                 throw("Malformed TX to sign" + unsigned);
             }
-            console.log(ret.result)
-
+            callback(ret.result)
         });
 
 
@@ -211,9 +209,46 @@ function singleTx(msg, hashtags, cheap) {
 }
 
 var run = function() {
-    var msg = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-    tx = singleTx(msg, [], false)
-    console.log(tx)
+    var msg = "These aer the words I would like to store in the block chain for ever and ever";
+
+
+    url = "/api/tx/d397b180b4b0b0b2d113822153ba7759be77caa3646c390c3477e1b7addc7665"
+
+    opts = {
+        path: url,
+        host: "localhost",
+        port: "3001"
+    }
+
+    http = require('http');
+
+   /* http.request(opts, function(response){
+        var str = '';
+
+        response.on('data', function(c) {
+            str += c;
+            console.log(c);
+        });
+        response.on('end', function() {
+            par = JSON.parse(str)
+            console.log(decodeAddressOuts(par.vout))
+        });
+    
+    }).end();*/
+
+
+    console.log(hashtagStr("Make A Ruckus"))
+
+    //console.log(hashtagStr("lies"))
+    //console.log(hashtagStr("laslalslsdlasd"))
+    //console.log(hashtagStr("toooobig==============="))
+
+    //console.log(decodeAddr(hashtagStr("blahblah blah!")))
+
+    singleTx(msg, [], function(signedTx){
+       console.log(signedTx)
+
+    });
 }
 
 module.exports.run = run;
