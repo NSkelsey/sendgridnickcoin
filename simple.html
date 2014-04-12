@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+  <body>
+    <script src="../../browser/bundle.js"></script>
+    <pre id="console"></pre>
+    <script>
+      var bitcore = require('bitcore');
+      var Address = bitcore.Address;
+      var a = new Address('1KerhGhLn3SYBEQwby7VyVMWf16fXQUj5d');
+      document.getElementById('console').innerHTML = '1KerhGhLn3SYBEQwby7VyVMWf16fXQUj5d is valid? '+a.isValid();
+
+      var networks = bitcore.networks;
+      var Peer = bitcore.Peer;
+      var PeerManager = bitcore.PeerManager;
+
+var run = function() {
+  // Replace '../bitcore' with 'bitcore' if you use this code elsewhere.
+
+  var handleBlock = function(info) {
+    console.log('** Block Received **');
+    console.log(info.message);
+    document.write(info.message);
+  };
+
+  var handleTx = function(info) {
+    var tx = info.message.tx.getStandardizedObject();
+
+    console.log('** TX Received **');
+    console.log(tx);
+    document.write(tx);
+  };
+
+  var handleInv = function(info) {
+    console.log('** Inv **');
+    console.log(info.message);
+    document.write(info.message);
+
+    var invs = info.message.invs;
+    info.conn.sendGetData(invs);
+  };
+
+  var peerman = new PeerManager();
+
+  peerman.addPeer(new Peer('54.83.28.75', 18333));
+
+  peerman.on('connection', function(conn) {
+    conn.on('inv', handleInv);
+    conn.on('block', handleBlock);
+    conn.on('tx', handleTx);
+  });
+
+  peerman.start();
+};
+
+  run();
+
+
+    </script>
+  </body>
+</html>
