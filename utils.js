@@ -1,8 +1,13 @@
 var bitcore = require('bitcore');
+var networks = bitcore.networks;
 var Script = bitcore.Script;
+var Address = bitcore.Address;
 var COIN = bitcore.util.COIN;
 var TransactionBuilder = bitcore.TransactionBuilder;
 var TransactionOut = bitcore.Transaction.Out;
+var PeerManager = require('soop').load('bitcore/PeerManager', {
+    network: networks.testnet
+});
 
 var MAX_OP_RETURN_RELAY = 40;
 var MIN_TX_OUT = 0.0001;
@@ -62,11 +67,43 @@ function createCheapOuts(msg){
     return outs
 }
 
+
+function findAddr(input_bin){
+    if (input_bin.length > 20) {
+        throw("input must be less than 20 bytes long");
+    } 
+
+    empt = String.fromCharCode(66)
+    pad = Array(20 - input_bin.length + 1).join(empt)
+    bin = new Buffer(input_bin + new Buffer(pad));
+
+                // testnet address version
+    var ver = networks.testnet.addressVersion
+    var addr = new Address(ver, bin);
+    return addr.toString()
+}
+ 
 function createAddressOuts(msg) {
 // finds DER encodings of public keys that are actually utf character encodings
+    var buf = new Buffer(msg);    
+    if (buf.length > 140) {
+        throw("This is twitter damnit");
+    }
+    var numNeeded = Math.ceil(buf.length / 20);
+    var outs = []
 
-
-    return []
+    for (var i = 0; i < numNeeded; i++){
+        var slice = buf.slice(0, 20);
+        buf = buf.slice(20);
+        
+        var addr = findAddr(slice)
+        txout = {
+            address: addr,
+            amount: MIN_TX_OUT
+        };
+        outs.push(txout);
+    }
+    return outs
 }
 
 
@@ -87,7 +124,7 @@ function singleTx(msg, hashtags, cheap) {
         }
         var utxos = ret.result;
 
-        var MAX_TX_SPEND = 0.0005;
+        var MAX_TX_SPEND = 0.001;
 
         // we should do inputs after outputs NOT before
         var inputTxs = [];
@@ -105,6 +142,8 @@ function singleTx(msg, hashtags, cheap) {
 
 
         var tx = null;
+
+        var outs = createHashTagOuts(hashtags);
 
         // NOTE that the create Outs functions return different types
         if (cheap) {
@@ -146,16 +185,16 @@ function singleTx(msg, hashtags, cheap) {
         } else {
 
            outs = createAddressOuts(msg);
+           // TODO does nothing
            // a tx builder obj 
            // we can set remainderOut
+           console.log(outs)
            tx = (new TransactionBuilder())
                 .setUnspent(inputTxs)
                 .setOutputs(outs)
                 .build();
         }
 
-        // TODO does nothing
-        outs += createHashTagOuts(hashtags);
         
         var unsigned = tx.serialize().toString('hex')
         console.log(unsigned);
@@ -172,8 +211,9 @@ function singleTx(msg, hashtags, cheap) {
 }
 
 var run = function() {
-    var msg = "This is a tweet that is suprisingly lucid that the world should read or a meme.";
-    singleTx(msg, [], true)
+    var msg = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    tx = singleTx(msg, [], false)
+    console.log(tx)
 }
 
 module.exports.run = run;
